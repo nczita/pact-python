@@ -7,6 +7,8 @@ from subprocess import Popen
 
 import psutil
 import requests
+import socket
+import urllib
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3 import Retry
 
@@ -38,7 +40,7 @@ class Pact(object):
 
     HEADERS = {'X-Pact-Mock-Service': 'true'}
 
-    def __init__(self, consumer, provider, host_name='localhost', port=1234,
+    def __init__(self, consumer, provider, host_name='localhost', port=None,
                  log_dir=None, ssl=False, sslcert=None, sslkey=None,
                  cors=False, pact_dir=None, version='2.0.0',
                  file_write_mode='overwrite'):
@@ -83,17 +85,14 @@ class Pact(object):
             `overwrite`.
         :type file_write_mode: str
         """
-        scheme = 'https' if ssl else 'http'
-        self.uri = '{scheme}://{host_name}:{port}'.format(
-            host_name=host_name, port=port, scheme=scheme)
-
+        self.scheme = 'https' if ssl else 'http'
         self.consumer = consumer
         self.cors = cors
         self.file_write_mode = file_write_mode
         self.host_name = host_name
         self.log_dir = log_dir or os.getcwd()
         self.pact_dir = pact_dir or os.getcwd()
-        self.port = port
+        self.port = port or self._get_free_port()
         self.provider = provider
         self.ssl = ssl
         self.sslcert = sslcert
@@ -101,6 +100,17 @@ class Pact(object):
         self.version = version
         self._interactions = []
         self._process = None
+
+    def _get_free_port(self):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind(("", 0))
+        port = sock.getsockname()[1]
+        sock.close()
+        return port
+
+    @property
+    def uri(self):
+        return '{scheme}://{host_name}:{port}'.format(host_name=self.host_name, port=self.port, scheme=self.scheme)
 
     def given(self, provider_state):
         """
@@ -193,6 +203,8 @@ class Pact(object):
         self._interactions[0]['description'] = scenario
         return self
 
+    description=upon_receiving
+
     def verify(self):
         """
         Have the mock service verify all interactions occurred.
@@ -252,6 +264,18 @@ class Pact(object):
                                                      headers=headers,
                                                      body=body).json()
         return self
+
+    def provide(self, response):
+        sufix = "/" + urllib.parse.quote(self._interactions[0]['provider_state'])
+        self._interactions[0]['request'] = Request(
+            'METHOD', sufix, body=None, headers=None, query=None).json()
+        self._interactions[0]['response'] = Response(status=777, body=response).json()
+        return self
+
+    def get_message_for_state(self, state):
+        sufix = "/" + urllib.parse.quote(state)
+        response = requests.request('METHOD', self.uri + sufix, headers=self.HEADERS)
+        return response.json()
 
     def _wait_for_server_start(self):
         """
@@ -342,7 +366,7 @@ class Request(FromTerms):
 class Response(FromTerms):
     """Represents an HTTP response and supports Matchers on its properties."""
 
-    def __init__(self, status, headers=None, body=None):
+    def __init__(self, status=None, headers=None, body=None):
         """
         Create a new Response.
 
@@ -360,6 +384,9 @@ class Response(FromTerms):
     def json(self):
         """Convert the Response to a JSON version for the mock service."""
         response = {'status': self.status}
+        response = {}
+        if self.status is not None:
+            response['status'] = self.status
         if self.body is not None:
             response['body'] = self.body
 

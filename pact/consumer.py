@@ -31,7 +31,7 @@ class Consumer(object):
         self.name = name
         self.service_cls = service_cls
 
-    def has_pact_with(self, provider, host_name='localhost', port=1234,
+    def has_pact_with(self, provider, host_name='localhost', port=None,
                       log_dir=None, ssl=False, sslcert=None, sslkey=None,
                       cors=False, pact_dir=None, version='2.0.0'):
         """
